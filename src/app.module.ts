@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
+import mikroOrmConfig from './infra/database/mikro-orm.config.js';
+import { HealthController } from './health/health.controller.js';
 
+ 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [MikroOrmModule.forRoot(mikroOrmConfig)],
+  controllers: [HealthController],
 })
 export class AppModule {}

@@ -57,8 +57,8 @@ Representa uma operação recebida de um provedor, com o ciclo de vida dela.
 ### Estados e transições
 
 ```
-PENDING            -> PENDING_REFERENCE | PROCESSED | REJECTED | FAILED
-PENDING_REFERENCE  -> PENDING_REFERENCE | PROCESSED | REJECTED | FAILED
+PENDING -> PENDING_REFERENCE | PROCESSED | REJECTED | FAILED
+PENDING_REFERENCE -> PENDING_REFERENCE | PROCESSED | REJECTED | FAILED
 PROCESSED, REJECTED, FAILED: terminais
 ```
 
@@ -101,20 +101,20 @@ PROCESSED, REJECTED, FAILED: terminais
 
 O provedor precisa decidir sozinho se reenvia, corrige o payload ou desiste. Por isso cada código tem uma ação (`providerActionFor`), e o compilador obriga a definir a ação de todo código novo.
 
-| Código | Situação | O provedor deve |
-| --- | --- | --- |
-| `INSUFFICIENT_FUNDS` | `BET` sem saldo | desistir |
-| `REVERSAL_WOULD_OVERDRAW` | reversão deixaria o saldo negativo | falar com o suporte |
-| `REFERENCE_NOT_FOUND` | a referência não chegou dentro do limite de tentativas | corrigir a referência ou reenviar a original |
-| `REFERENCE_MISMATCH` | referência de outro provedor, jogador, wallet, rodada ou moeda | corrigir o payload |
-| `INVALID_REFERENCE_KIND` | tipo de referência não permitido | corrigir o payload |
-| `REFERENCE_NOT_PROCESSED` | a referência existe, mas foi rejeitada ou falhou | desistir |
-| `ALREADY_REVERSED` | a referência já foi revertida | desistir |
-| `AMOUNT_MISMATCH` | valor da reversão diferente do da referência | corrigir o payload |
-| `CURRENCY_MISMATCH` | moeda diferente da da wallet | corrigir o payload |
-| `WALLET_NOT_FOUND` | wallet inexistente | corrigir o payload |
-| `WALLET_PLAYER_MISMATCH` | a wallet não pertence ao jogador informado | corrigir o payload |
-| `PROCESSING_FAILED` | erro permanente de infraestrutura | falar com o suporte |
+| Código                    | Situação                                                       | O provedor deve                              |
+| ------------------------- | -------------------------------------------------------------- | -------------------------------------------- |
+| `INSUFFICIENT_FUNDS`      | `BET` sem saldo                                                | desistir                                     |
+| `REVERSAL_WOULD_OVERDRAW` | reversão deixaria o saldo negativo                             | falar com o suporte                          |
+| `REFERENCE_NOT_FOUND`     | a referência não chegou dentro do limite de tentativas         | corrigir a referência ou reenviar a original |
+| `REFERENCE_MISMATCH`      | referência de outro provedor, jogador, wallet, rodada ou moeda | corrigir o payload                           |
+| `INVALID_REFERENCE_KIND`  | tipo de referência não permitido                               | corrigir o payload                           |
+| `REFERENCE_NOT_PROCESSED` | a referência existe, mas foi rejeitada ou falhou               | desistir                                     |
+| `ALREADY_REVERSED`        | a referência já foi revertida                                  | desistir                                     |
+| `AMOUNT_MISMATCH`         | valor da reversão diferente do da referência                   | corrigir o payload                           |
+| `CURRENCY_MISMATCH`       | moeda diferente da da wallet                                   | corrigir o payload                           |
+| `WALLET_NOT_FOUND`        | wallet inexistente                                             | corrigir o payload                           |
+| `WALLET_PLAYER_MISMATCH`  | a wallet não pertence ao jogador informado                     | corrigir o payload                           |
+| `PROCESSING_FAILED`       | erro permanente de infraestrutura                              | falar com o suporte                          |
 
 - Saldo insuficiente em aposta e reversão que estoura o saldo têm códigos e ações diferentes, como o README pede: na primeira o provedor não pode fazer nada, e a segunda é uma situação operacional que alguém precisa olhar.
 - Falhas transitórias (banco fora do ar, por exemplo) não viram `FailureCode`. Elas não são gravadas como estado terminal: a operação é repetida, e só um erro permanente vira `FAILED`.
@@ -129,8 +129,8 @@ O provedor é só uma identidade (`providerId`). Não há lógica por provedor n
 
 ## 9. Estratégia de testes
 
-- Domínio: testes unitários com `bun test`, sem banco e sem fila. Não há infraestrutura para substituir, então não há mock.
-- Integração e concorrência (a partir da persistência): PostgreSQL e SQS reais em containers, com paralelismo real. O desafio elimina soluções que substituem PostgreSQL e SQS por mocks.
+- Domínio e mappers: testes unitários com `bun test`, sem banco e sem fila. Não há infraestrutura para substituir, então não há mock.
+- Integração e concorrência (a partir da persistência de use cases): PostgreSQL e SQS reais em containers, com paralelismo real. O desafio elimina soluções que substituem PostgreSQL e SQS por mocks.
 - O tempo é passado como parâmetro (`now`, `at`, `createdAt`), o que deixa os testes determinísticos.
 - Garantias do schema: `db/checks/0001-constraints.sql` tenta violar cada garantia contra o PostgreSQL real e imprime `ok` quando o banco recusa (seção 13).
 
@@ -143,6 +143,7 @@ O provedor é só uma identidade (`providerId`). Não há lógica por provedor n
 - O serviço `postgres` tem healthcheck (`pg_isready`), então o Compose sabe quando o banco aceita conexão. O MiniStack não tem healthcheck no Compose, porque não há garantia de que a imagem tenha `curl`. A verificação é manual, pelo endpoint `/_ministack/health`.
 - Configuração por variáveis de ambiente. O `.env.example` vai para o Git e o `.env` não. Os valores são só de desenvolvimento local: usuário e senha do banco inventados, e chaves AWS `test`, que o MiniStack não valida. O Compose tem valores padrão para todas as variáveis, então sobe mesmo sem `.env`.
 - A imagem do MiniStack está fixada na versão 1.5.28 (a que o endpoint de health reportou), para o ambiente não mudar sozinho. O PostgreSQL fixa só a versão principal (16).
+- Porta do Postgres no host: `POSTGRES_PORT` (padrão 5432). No Windows, se já existir um Postgres na 5432, usa-se `5433` no `.env` e o `DATABASE_URL` aponta para essa porta.
 - Custo: atualizar o MiniStack passa a ser uma troca deliberada de versão, seguida de nova rodada de testes.
 
 ## 11. Filas SQS
@@ -161,34 +162,82 @@ O provedor é só uma identidade (`providerId`). Não há lógica por provedor n
 - Por quê: UUID v7 é ordenável por tempo, o que ajuda índice e paginação por cursor. Gerar na aplicação deixa o id existir antes do `INSERT`, então o domínio já nasce com ele e o lançamento do ledger já pode referenciar a transação.
 - Alternativa descartada: `gen_random_uuid()` (v4) como default do banco. Não é ordenável e esconde a geração do id fora do código.
 - Identificadores externos (jogador, provedor, id externo, idempotency key, rodada, jogo) são `text`, porque o formato é do provedor e não do sistema. No domínio, todo id é `string`.
-- Dinheiro: `numeric(19,2)`, com a moeda numa coluna `text` à parte. O valor nunca pode ser lido como `number`; a leitura será sempre como string, convertida em `Money` na borda.
+- Dinheiro: `numeric(19,2)`, com a moeda numa coluna `text` à parte. O valor nunca pode ser lido como `number`; a leitura é sempre como string, convertida em `Money` nos mappers.
 - Estado, tipo, direção e código de falha são `text` com `CHECK`, não `ENUM` do PostgreSQL. Mudar um `ENUM` exige `ALTER TYPE`, que é mais incômodo numa migration reversível, e o `CHECK` dá a mesma garantia.
-- O mapeamento entre `numeric` e `Money` ainda não existe. Será escrito junto com o MikroORM.
+- O mapeamento entre `numeric` e `Money` está nos mappers (`wallet.mapper`, `wager-transaction.mapper`, `wallet-ledger-entry.mapper`).
 
 ## 13. Schema do banco (migration 0001)
 
 Arquivos: `db/migrations/0001-initial.up.sql`, `db/migrations/0001-initial.down.sql` e `db/checks/0001-constraints.sql`.
 
 - Tabelas: `wallets`, `wager_transactions` e `wallet_ledger_entries`.
-- Escolha: as garantias que o desafio chama de invioláveis (unicidade, imutabilidade, não-negatividade) ficam no schema, não só no código.
+- Escolha: as garantias que o desafio chama de invioláveis (unicidade, imutabilidade e não-negatividade) ficam no schema, não só no código.
 - Por quê: o código pode ter bug, e várias instâncias podem escrever ao mesmo tempo. O banco é o único ponto que todas as instâncias respeitam.
+- Nas tabelas, o valor se chama `amount` (com `currency` ao lado). No domínio o mesmo dado é o `Money`.
+- O SQL da migration **não** contém `BEGIN`/`COMMIT`: o Migrator do MikroORM já envolve a migration em transação.
 
-Garantias:
+### `wallets`
 
-- uma wallet por jogador e moeda: `UNIQUE (player_id, currency)`;
-- saldo nunca negativo: `CHECK (balance >= 0)`;
+Colunas: `id` (uuid, chave primária), `player_id`, `currency`, `balance numeric(19,2)`, `version integer`, `created_at`, `updated_at`.
+
+- Uma wallet por jogador e moeda: `UNIQUE (player_id, currency)`.
+- Saldo nunca negativo: `CHECK (balance >= 0)`.
+- Moeda com 3 letras maiúsculas e `version >= 1`.
+
+### `wager_transactions`
+
+Colunas: `id`, `provider_id`, `external_transaction_id`, `idempotency_key`, `payload_hash`, `wallet_id`, `player_id`, `round_id`, `game_id`, `kind`, `amount`, `currency`, `reference_external_transaction_id`, `reference_transaction_id`, `status`, `failure_code`, `created_at`, `processed_at`.
+
+Unicidade:
+
 - idempotência por provedor: `UNIQUE (provider_id, external_transaction_id)` e `UNIQUE (provider_id, idempotency_key)`;
-- no máximo um lançamento por transação e wallet: `UNIQUE (wallet_id, transaction_id)` no ledger;
-- aritmética do lançamento: `CHECK` sobre `balance_before`, `money` e `balance_after`, conforme a direção;
-- ledger imutável: trigger que bloqueia `UPDATE` e `DELETE` em `wallet_ledger_entries`;
-- provedor `system` só em `OPENING`: `CHECK`, que fecha por fora o que `WagerTransaction.create` já rejeita;
-- uma abertura por wallet: índice único parcial sobre as transações `OPENING`.
+- uma abertura por wallet: índice único parcial sobre `wallet_id` onde `kind = 'OPENING'`;
+- `UNIQUE (id, wallet_id)`, que existe para o ledger apontar para a transação e a wallet juntas (ver abaixo).
 
-Decisões de modelagem:
+Regras de consistência (todas `CHECK`):
 
-- `wager_transactions.wallet_id` não tem chave estrangeira. Assim uma transação para wallet inexistente pode ser gravada como `REJECTED` com `WALLET_NOT_FOUND`, e fica auditável.
-- O ledger tem chave estrangeira para a wallet e para a transação (composta com a wallet), então um lançamento nunca aponta para transação de outra wallet.
+- `kind` e `status` só aceitam os valores do enum; `failure_code` só aceita os códigos do `FailureCode`;
+- `REJECTED` e `FAILED` exigem `failure_code`, e os demais estados o proíbem;
+- `PROCESSED` exige `processed_at`, e os demais estados o proíbem;
+- `REFUND` e `ROLLBACK` exigem referência, `BET` e `OPENING` a proíbem, `WIN` e `LOSS` aceitam as duas situações;
+- valor nunca negativo, e positivo em todo tipo exceto `LOSS`;
+- provedor `system` se, e somente se, o tipo for `OPENING`. Isso fecha por fora o que `WagerTransaction.create` já rejeita.
 
-Como foi validado: `db/checks/0001-constraints.sql` tenta violar cada garantia (12 checks) e imprime `ok` quando o banco recusa. O `down` apaga tudo e deixa o `\dt` vazio, e o `up` reaplica do zero.
+`reference_transaction_id` tem chave estrangeira para a própria tabela. `wallet_id` **não** tem chave estrangeira: assim uma transação para wallet inexistente pode ser gravada como `REJECTED` com `WALLET_NOT_FOUND`, e fica auditável.
 
-Limitação: por enquanto as migrations são aplicadas com `psql`. O MikroORM vai assumir o controle de versões, adotando a 0001 como primeira migration.
+### `wallet_ledger_entries`
+
+Colunas: `id`, `wallet_id`, `transaction_id`, `direction`, `amount`, `currency`, `balance_before`, `balance_after`, `created_at`.
+
+- No máximo um lançamento por transação e wallet: `UNIQUE (wallet_id, transaction_id)`.
+- Aritmética do lançamento: `CHECK` que exige `balance_before - amount = balance_after` em `DEBIT` e `balance_before + amount = balance_after` em `CREDIT`.
+- Valor positivo, saldos antes e depois não negativos, direção só `DEBIT` ou `CREDIT`, moeda com 3 letras.
+- Imutável: o trigger `wallet_ledger_entries_immutable` roda antes de todo `UPDATE` e `DELETE` e chama `forbid_ledger_mutation()`, que recusa a operação.
+- Chave estrangeira composta `(transaction_id, wallet_id)` para `wager_transactions (id, wallet_id)`, então um lançamento nunca aponta para a transação de outra wallet. Há também chave estrangeira de `wallet_id` para `wallets`.
+- Índice `(wallet_id, created_at, id)`, pensado para a paginação por cursor do ledger.
+
+### Limitações
+
+- O trigger de imutabilidade é por linha. Ele não impede `TRUNCATE`, nem que o dono do banco remova o próprio trigger. A imutabilidade vale contra o código da aplicação, não contra quem administra o banco. Em produção o usuário da aplicação deveria ter só `INSERT` e `SELECT` no ledger.
+- Algumas regras ainda dependem do use case, porque exigem olhar outras linhas: a referência estar `PROCESSED`, a reversão única e o saldo negativo causado por reversão.
+
+### Como foi validado
+
+`db/checks/0001-constraints.sql` tenta violar cada garantia (12 checks) e imprime `ok` quando o banco recusa. O `down` apaga tudo e deixa o `\dt` vazio, e o `up` reaplica do zero. A estrutura desta seção foi conferida com `\d` em cada tabela.
+
+As migrations são aplicadas pelo Migrator do MikroORM (`bun run db:migrate` / `db:rollback` / `db:status`), adotando a 0001 como primeira migration.
+
+## 14. MikroORM e mapeamento domínio ↔ banco
+
+- Escolha: EntitySchema + row types (interfaces plain) + mappers puros. O domínio não importa MikroORM.
+- Por quê: o desafio pede domínio sem framework; `numeric(19,2)` nunca pode virar `number` no JS; EntitySchema funciona melhor com Bun + ESM do que decorators.
+- Dinheiro na borda: sempre `string` com 2 casas. O mapper chama `Money.from` / `toJSON()`. Se o driver devolver `number`, o `Money.from` rejeita (`InvalidMoneyError`).
+- Config: `buildMikroOrmConfig(clientUrl)` reutilizável (app + testes de integração futuros). `mikro-orm.config.ts` só lê `DATABASE_URL` e delega.
+- Migration 0001: o SQL escrito à mão continua sendo a fonte da verdade. A classe `Migration0001Initial` lê o arquivo e chama `addSql`. O Migrator controla a tabela `mikro_orm_migrations`.
+- Alternativa descartada: gerar a migration a partir dos EntitySchemas. O schema já existia e estava validado; reescrever em TypeScript aumentaria o risco de divergência.
+
+## 15. Health
+
+- `GET /health/live`: processo vivo (sempre 200).
+- `GET /health/ready`: executa `select 1` no banco; responde 503 se o banco estiver inacessível.
+- Autenticação: não será implementada. Documentado aqui e deixado um ponto de extensão no código (guard sem efeito quando as rotas de negócio existirem).

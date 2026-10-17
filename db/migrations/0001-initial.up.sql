@@ -1,4 +1,4 @@
-BEGIN;
+
 
 CREATE TABLE wallets (
   id uuid PRIMARY KEY,
@@ -121,5 +121,3 @@ $$;
 CREATE TRIGGER wallet_ledger_entries_immutable
   BEFORE UPDATE OR DELETE ON wallet_ledger_entries
   FOR EACH ROW EXECUTE FUNCTION forbid_ledger_mutation();
-
-COMMIT;
