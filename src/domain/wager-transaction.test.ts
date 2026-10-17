@@ -4,9 +4,11 @@ import { FailureCode } from './failure-code.js';
 import { Money } from './money.js';
 import { LedgerDirection } from './wallet-ledger-entry.js';
 import {
+  SYSTEM_PROVIDER_ID,
   WagerTransaction,
   WagerTransactionKind,
   WagerTransactionStatus,
+  type CreateOpeningTransactionProps,
   type CreateWagerTransactionProps,
 } from './wager-transaction.js';
 
@@ -62,6 +64,19 @@ const ofKind = (kind: WagerTransactionKind) =>
         : undefined,
   });
 
+const openingProps: CreateOpeningTransactionProps = {
+  id: 'tx-open-1',
+  walletId: 'wallet-1',
+  playerId: 'player-1',
+  money: brl('100.00'),
+  createdAt: now,
+};
+
+type OpeningOverrides = Partial<CreateOpeningTransactionProps>;
+
+const makeOpening = (overrides: OpeningOverrides = {}) =>
+  WagerTransaction.createOpening({ ...openingProps, ...overrides });
+
 describe('WagerTransaction.create', () => {
   it('nasce PENDING, sem falha e sem data de processamento', () => {
     const tx = make();
@@ -74,6 +89,13 @@ describe('WagerTransaction.create', () => {
 
   it('rejeita OPENING, que é interno', () => {
     expect(() => make({ kind: WagerTransactionKind.Opening })).toThrow(
+      InvalidWagerTransactionError,
+    );
+  });
+
+  it('rejeita o provedor reservado system', () => {
+    expect(() => make({ providerId: SYSTEM_PROVIDER_ID })).toThrow(InvalidWagerTransactionError);
+    expect(() => make({ providerId: ` ${SYSTEM_PROVIDER_ID} ` })).toThrow(
       InvalidWagerTransactionError,
     );
   });
@@ -151,6 +173,67 @@ describe('WagerTransaction.create', () => {
     expect(() => make({ money: brl('1.00').subtract(brl('2.00')) })).toThrow(
       InvalidWagerTransactionError,
     );
+  });
+});
+
+describe('WagerTransaction.createOpening', () => {
+  it('nasce PROCESSED com os valores reservados da abertura', () => {
+    const tx = makeOpening();
+    expect(tx.kind).toBe(WagerTransactionKind.Opening);
+    expect(tx.status).toBe(WagerTransactionStatus.Processed);
+    expect(tx.providerId).toBe(SYSTEM_PROVIDER_ID);
+    expect(tx.externalTransactionId).toBe('opening:wallet-1');
+    expect(tx.idempotencyKey).toBe('opening:wallet-1');
+    expect(tx.payloadHash).toBe('opening');
+    expect(tx.roundId).toBe('opening');
+    expect(tx.gameId).toBe('opening');
+    expect(tx.walletId).toBe('wallet-1');
+    expect(tx.playerId).toBe('player-1');
+    expect(tx.money.equals(brl('100.00'))).toBe(true);
+    expect(tx.referenceExternalTransactionId).toBeUndefined();
+    expect(tx.referenceTransactionId).toBeUndefined();
+    expect(tx.failureCode).toBeUndefined();
+    expect(tx.createdAt).toEqual(now);
+    expect(tx.processedAt).toEqual(now);
+    expect(tx.isTerminal()).toBe(true);
+  });
+
+  it('as chaves dependem só da wallet: iguais para a mesma, diferentes entre wallets', () => {
+    const first = makeOpening({ id: 'tx-open-a' });
+    const sameWallet = makeOpening({ id: 'tx-open-b' });
+    const otherWallet = makeOpening({ id: 'tx-open-c', walletId: 'wallet-2' });
+
+    expect(sameWallet.externalTransactionId).toBe(first.externalTransactionId);
+    expect(sameWallet.idempotencyKey).toBe(first.idempotencyKey);
+    expect(otherWallet.externalTransactionId).not.toBe(first.externalTransactionId);
+    expect(otherWallet.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it('credita, afeta o saldo e não pede referência', () => {
+    const tx = makeOpening();
+    expect(tx.ledgerDirectionFor()).toBe(LedgerDirection.Credit);
+    expect(tx.affectsBalance()).toBe(true);
+    expect(tx.requiresReference()).toBe(false);
+  });
+
+  it('rejeita valor zero', () => {
+    expect(() => makeOpening({ money: Money.zero('BRL') })).toThrow(InvalidWagerTransactionError);
+  });
+
+  const openingTextFields = ['id', 'walletId', 'playerId'] as const;
+
+  it.each(openingTextFields)('rejeita %s vazio', (field) => {
+    expect(() => makeOpening({ [field]: '  ' } as OpeningOverrides)).toThrow(
+      InvalidWagerTransactionError,
+    );
+  });
+
+  it('é terminal e não aceita nenhuma transição', () => {
+    const tx = makeOpening();
+    expect(() => tx.markProcessed(undefined, later)).toThrow(InvalidTransactionStateError);
+    expect(() => tx.reject(FailureCode.ProcessingFailed)).toThrow(InvalidTransactionStateError);
+    expect(() => tx.fail(FailureCode.ProcessingFailed)).toThrow(InvalidTransactionStateError);
+    expect(tx.status).toBe(WagerTransactionStatus.Processed);
   });
 });
 

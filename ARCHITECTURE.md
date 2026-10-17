@@ -11,7 +11,7 @@ Decisões tomadas até agora. As seções de concorrência, idempotência e mens
 
 ## 2. Domínio sem framework
 
-- Escolha: as classes de domínio não importam NestJS nem ORM. Construtor privado e factories estáticas (`from`, `create`, `open`, `rehydrate`).
+- Escolha: as classes de domínio não importam NestJS nem ORM. Construtor privado e factories estáticas (`from`, `create`, `createOpening`, `open`, `rehydrate`).
 - Por quê: o domínio testa só com `bun test`, sem banco, e as regras ficam num lugar só. O desafio também pede isso.
 - Custo: depois vai ser preciso código de mapeamento entre domínio e banco.
 
@@ -34,7 +34,7 @@ Regras:
 - Por quê: cada linha se audita sozinha, e a reconciliação consegue reconstruir o saldo.
 - `create` valida que `balanceBefore ± money === balanceAfter`. `rehydrate` só reconstrói o que já foi persistido.
 - Valor zero é rejeitado: `LOSS` e transações `REJECTED` não geram lançamento, então uma linha zerada seria bug.
-- Saldo negativo é rejeitado. No banco isso vai virar uma constraint também.
+- Saldo negativo é rejeitado, e o banco também barra (seção 13).
 - Imutável: todos os campos são `readonly` e não há método que altere estado.
 - Limitação: o objeto `Date` interno continua mutável.
 
@@ -73,7 +73,17 @@ PROCESSED, REJECTED, FAILED: terminais
 - `create` nasce `PENDING` e valida tudo que dá para validar sem consultar o banco: campos de texto não vazios, `kind` conhecido, referência exigida ou proibida por tipo, e valor.
 - `BET` não pode ter referência. `REFUND` e `ROLLBACK` exigem. `WIN` e `LOSS` aceitam, com ou sem.
 - Valor zero é rejeitado, exceto em `LOSS`, que só registra um resultado e não move saldo.
-- `OPENING` é rejeitado em `create`, porque é um tipo interno que não pode vir da API nem da fila. Falta uma factory interna para a transação de abertura da wallet, que será desenhada junto com a persistência (a transação de abertura não tem provedor nem idempotency key reais).
+- `create` rejeita `OPENING` (tipo interno, não pode vir da API nem da fila) e rejeita o provedor reservado `system`, inclusive com espaços ao redor. Sem isso, um provedor externo poderia se passar pela abertura de wallet.
+
+### Transação `OPENING`
+
+- Escolha: `WagerTransaction.createOpening({ id, walletId, playerId, money, createdAt })`, factory interna que nasce `PROCESSED` com `processedAt` igual a `createdAt`.
+- Por quê: o README exige provedor, id externo, idempotency key e payload hash em toda transação, e a abertura não vem de provedor nenhum. Em vez de deixar essas colunas `NULL` (o que enfraqueceria as unique constraints), a abertura recebe valores internos e determinísticos.
+- Valores reservados: `providerId` é `system`; `externalTransactionId` e `idempotencyKey` são `opening:<walletId>`; `roundId` e `gameId` são `opening`; `payloadHash` é fixo (`opening`).
+- Como as chaves dependem só da wallet, duas aberturas da mesma wallet colidem nas unique constraints, e wallets diferentes nunca colidem. No banco isso é reforçado por um índice único parcial (seção 13).
+- Alternativa descartada: colunas anuláveis para a abertura. Enfraquece a unicidade `(provider_id, external_transaction_id)`, porque `NULL` nunca é igual a `NULL` no `UNIQUE` do PostgreSQL.
+- A factory valida `id`, `walletId` e `playerId` não vazios e valor positivo. É a mesma regra do README: saldo inicial zero não gera `OPENING`.
+- `OPENING` credita (`ledgerDirectionFor` devolve `CREDIT`), afeta saldo e não pede referência. Por nascer terminal, não aceita nenhuma transição.
 
 ### Direção do lançamento
 
@@ -84,7 +94,7 @@ PROCESSED, REJECTED, FAILED: terminais
 
 - `validateReference(reference)` devolve um `FailureCode` ou `undefined`. Confere, nessa ordem: id externo, provedor, jogador, wallet, rodada e moeda iguais (`REFERENCE_MISMATCH`); tipo permitido (`INVALID_REFERENCE_KIND`); e, em `REFUND` e `ROLLBACK`, valor igual ao da referência (`AMOUNT_MISMATCH`).
 - Tipos permitidos: `REFUND` referencia só `BET`. `ROLLBACK` referencia `BET`, `WIN` ou `REFUND`. `WIN` e `LOSS` referenciam só `BET`.
-- O que fica de fora, de propósito, porque depende do banco e será do use case: a referência estar `PROCESSED`, a reversão única (uma referência não pode ser revertida duas vezes pelo mesmo tipo) e saldo negativo causado pela reversão.
+- O que fica de fora, de propósito, porque depende do banco e será do use case: a referência estar `PROCESSED`, a reversão única da mesma referência e saldo negativo causado pela reversão.
 - Por quê: o domínio decide o que dá para decidir olhando só dois objetos, e devolve um código em vez de lançar, para o use case poder gravar a rejeição de forma auditável.
 
 ## 7. Códigos de falha (`FailureCode`)
@@ -122,3 +132,63 @@ O provedor é só uma identidade (`providerId`). Não há lógica por provedor n
 - Domínio: testes unitários com `bun test`, sem banco e sem fila. Não há infraestrutura para substituir, então não há mock.
 - Integração e concorrência (a partir da persistência): PostgreSQL e SQS reais em containers, com paralelismo real. O desafio elimina soluções que substituem PostgreSQL e SQS por mocks.
 - O tempo é passado como parâmetro (`now`, `at`, `createdAt`), o que deixa os testes determinísticos.
+- Garantias do schema: `db/checks/0001-constraints.sql` tenta violar cada garantia contra o PostgreSQL real e imprime `ok` quando o banco recusa (seção 13).
+
+## 10. Ambiente local (Docker Compose)
+
+- Escolha: `docker-compose.yml` com PostgreSQL 16 (`postgres:16-alpine`) e MiniStack (`ministackorg/ministack:1.5.28`), cada um num container.
+- Por quê: os testes de integração e de concorrência precisam de PostgreSQL e SQS reais, e o desafio elimina quem os troca por mocks. Com Compose, quem clonar o repositório sobe o mesmo ambiente com um comando, e os testes com várias instâncias da aplicação apontam para o mesmo banco.
+- Por que MiniStack e não LocalStack: o LocalStack passou a exigir token de autenticação. O MiniStack roda sem conta e atende SQS na porta 4566.
+- O PostgreSQL guarda os dados num volume nomeado (`postgres-data`), que sobrevive a `docker compose down`. `docker compose down -v` (`bun run infra:reset`) apaga o volume e recomeça do zero.
+- O serviço `postgres` tem healthcheck (`pg_isready`), então o Compose sabe quando o banco aceita conexão. O MiniStack não tem healthcheck no Compose, porque não há garantia de que a imagem tenha `curl`. A verificação é manual, pelo endpoint `/_ministack/health`.
+- Configuração por variáveis de ambiente. O `.env.example` vai para o Git e o `.env` não. Os valores são só de desenvolvimento local: usuário e senha do banco inventados, e chaves AWS `test`, que o MiniStack não valida. O Compose tem valores padrão para todas as variáveis, então sobe mesmo sem `.env`.
+- A imagem do MiniStack está fixada na versão 1.5.28 (a que o endpoint de health reportou), para o ambiente não mudar sozinho. O PostgreSQL fixa só a versão principal (16).
+- Custo: atualizar o MiniStack passa a ser uma troca deliberada de versão, seguida de nova rodada de testes.
+
+## 11. Filas SQS
+
+- Escolha: `scripts/create-queues.ts` cria `wager-transactions.fifo` e `wager-transactions-dlq.fifo`, ambas FIFO. A fila principal tem `RedrivePolicy` apontando para a DLQ, com `maxReceiveCount` 5, e `VisibilityTimeout` de 30 segundos.
+- Por quê: os nomes e o formato FIFO vêm do desafio. A DLQ recebe a mensagem depois de 5 recebimentos sem sucesso, e é onde ficam os erros permanentes.
+- O script pode rodar mais de uma vez: o SQS devolve a fila existente quando a configuração é a mesma.
+- O script se recusa a rodar sem `AWS_ENDPOINT_URL`. Sem isso o SDK usaria a AWS de verdade, e o script existe só para o emulador.
+- As filas somem se o container do MiniStack for recriado, então `bun run infra:queues` precisa rodar de novo.
+- Os valores de `maxReceiveCount` (5) e `VisibilityTimeout` (30 s) são provisórios. Serão justificados quando o consumidor existir.
+- Limitação: o FIFO ordena e deduplica por grupo de mensagens, mas isso é otimização. A consistência continua sendo responsabilidade do banco, como o desafio exige.
+
+## 12. Identificadores e tipos no banco
+
+- Ids gerados pelo sistema (wallet, transação, lançamento): UUID v7 gerado na aplicação com `Bun.randomUUIDv7()`, fora do domínio. A coluna é `uuid` sem default no banco.
+- Por quê: UUID v7 é ordenável por tempo, o que ajuda índice e paginação por cursor. Gerar na aplicação deixa o id existir antes do `INSERT`, então o domínio já nasce com ele e o lançamento do ledger já pode referenciar a transação.
+- Alternativa descartada: `gen_random_uuid()` (v4) como default do banco. Não é ordenável e esconde a geração do id fora do código.
+- Identificadores externos (jogador, provedor, id externo, idempotency key, rodada, jogo) são `text`, porque o formato é do provedor e não do sistema. No domínio, todo id é `string`.
+- Dinheiro: `numeric(19,2)`, com a moeda numa coluna `text` à parte. O valor nunca pode ser lido como `number`; a leitura será sempre como string, convertida em `Money` na borda.
+- Estado, tipo, direção e código de falha são `text` com `CHECK`, não `ENUM` do PostgreSQL. Mudar um `ENUM` exige `ALTER TYPE`, que é mais incômodo numa migration reversível, e o `CHECK` dá a mesma garantia.
+- O mapeamento entre `numeric` e `Money` ainda não existe. Será escrito junto com o MikroORM.
+
+## 13. Schema do banco (migration 0001)
+
+Arquivos: `db/migrations/0001-initial.up.sql`, `db/migrations/0001-initial.down.sql` e `db/checks/0001-constraints.sql`.
+
+- Tabelas: `wallets`, `wager_transactions` e `wallet_ledger_entries`.
+- Escolha: as garantias que o desafio chama de invioláveis (unicidade, imutabilidade, não-negatividade) ficam no schema, não só no código.
+- Por quê: o código pode ter bug, e várias instâncias podem escrever ao mesmo tempo. O banco é o único ponto que todas as instâncias respeitam.
+
+Garantias:
+
+- uma wallet por jogador e moeda: `UNIQUE (player_id, currency)`;
+- saldo nunca negativo: `CHECK (balance >= 0)`;
+- idempotência por provedor: `UNIQUE (provider_id, external_transaction_id)` e `UNIQUE (provider_id, idempotency_key)`;
+- no máximo um lançamento por transação e wallet: `UNIQUE (wallet_id, transaction_id)` no ledger;
+- aritmética do lançamento: `CHECK` sobre `balance_before`, `money` e `balance_after`, conforme a direção;
+- ledger imutável: trigger que bloqueia `UPDATE` e `DELETE` em `wallet_ledger_entries`;
+- provedor `system` só em `OPENING`: `CHECK`, que fecha por fora o que `WagerTransaction.create` já rejeita;
+- uma abertura por wallet: índice único parcial sobre as transações `OPENING`.
+
+Decisões de modelagem:
+
+- `wager_transactions.wallet_id` não tem chave estrangeira. Assim uma transação para wallet inexistente pode ser gravada como `REJECTED` com `WALLET_NOT_FOUND`, e fica auditável.
+- O ledger tem chave estrangeira para a wallet e para a transação (composta com a wallet), então um lançamento nunca aponta para transação de outra wallet.
+
+Como foi validado: `db/checks/0001-constraints.sql` tenta violar cada garantia (12 checks) e imprime `ok` quando o banco recusa. O `down` apaga tudo e deixa o `\dt` vazio, e o `up` reaplica do zero.
+
+Limitação: por enquanto as migrations são aplicadas com `psql`. O MikroORM vai assumir o controle de versões, adotando a 0001 como primeira migration.

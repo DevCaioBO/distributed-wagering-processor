@@ -32,6 +32,11 @@ const REQUIRED_TEXT_FIELDS = [
   'gameId',
 ] as const;
 
+export const SYSTEM_PROVIDER_ID = 'system';
+
+const OPENING_LABEL = 'opening';
+const OPENING_PAYLOAD_HASH = 'opening';
+
 const REFERENCE_REQUIRED_KINDS: ReadonlySet<WagerTransactionKind> = new Set([
   WagerTransactionKind.Refund,
   WagerTransactionKind.Rollback,
@@ -67,6 +72,14 @@ export interface CreateWagerTransactionProps {
   kind: WagerTransactionKind;
   money: Money;
   referenceExternalTransactionId?: string;
+  createdAt: Date;
+}
+
+export interface CreateOpeningTransactionProps {
+  id: string;
+  walletId: string;
+  playerId: string;
+  money: Money;
   createdAt: Date;
 }
 
@@ -128,6 +141,30 @@ export class WagerTransaction {
       props.referenceExternalTransactionId,
       props.createdAt,
       WagerTransactionStatus.Pending,
+    );
+  }
+
+  static createOpening(props: CreateOpeningTransactionProps): WagerTransaction {
+    WagerTransaction.assertValidOpening(props);
+    const externalKey = `${OPENING_LABEL}:${props.walletId}`;
+    return new WagerTransaction(
+      props.id,
+      SYSTEM_PROVIDER_ID,
+      externalKey,
+      externalKey,
+      OPENING_PAYLOAD_HASH,
+      props.walletId,
+      props.playerId,
+      OPENING_LABEL,
+      OPENING_LABEL,
+      WagerTransactionKind.Opening,
+      props.money,
+      undefined,
+      props.createdAt,
+      WagerTransactionStatus.Processed,
+      undefined,
+      undefined,
+      props.createdAt,
     );
   }
 
@@ -292,6 +329,10 @@ export class WagerTransaction {
       }
     }
 
+    if (props.providerId.trim() === SYSTEM_PROVIDER_ID) {
+      throw new InvalidWagerTransactionError(`${SYSTEM_PROVIDER_ID} is a reserved provider id`);
+    }
+
     if (!Object.values(WagerTransactionKind).includes(props.kind)) {
       throw new InvalidWagerTransactionError(`Unknown kind: ${String(props.kind)}`);
     }
@@ -313,6 +354,17 @@ export class WagerTransaction {
     const allowsZero = props.kind === WagerTransactionKind.Loss;
     if (props.money.isNegative() || (!allowsZero && props.money.isZero())) {
       throw new InvalidWagerTransactionError(`Invalid amount for ${props.kind}`);
+    }
+  }
+
+  private static assertValidOpening(props: CreateOpeningTransactionProps): void {
+    for (const field of ['id', 'walletId', 'playerId'] as const) {
+      if (!isFilled(props[field])) {
+        throw new InvalidWagerTransactionError(`${field} is required`);
+      }
+    }
+    if (!props.money.isPositive()) {
+      throw new InvalidWagerTransactionError('OPENING needs a positive amount');
     }
   }
 }
