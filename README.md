@@ -4,7 +4,7 @@ Serviço que processa transações de apostas (`BET`, `WIN`, `LOSS`, `REFUND`, `
 
 Implementação do [desafio técnico da Jungle Gaming](https://github.com/junglegaming/backend-challenge/blob/main/README.md).
 
-Estado atual: domínio (`Money` e `WalletLedgerEntry`) com testes. Ainda não há banco, filas nem endpoints.
+Estado atual: domínio completo (`Money`, `WalletLedgerEntry`, `Wallet`, `WagerTransaction` e `FailureCode`) com testes unitários. Ainda não há banco, filas nem endpoints.
 
 ## Requisitos
 
@@ -33,5 +33,9 @@ src/
   domain/    regras de negócio, sem NestJS e sem ORM
   main.ts
 ```
+
+## Testes
+
+Os testes do domínio são unitários e rodam só com `bun test`. Os testes de integração e de concorrência vão usar PostgreSQL e SQS reais em containers, sem mocks, como o desafio exige.
 
 As decisões de arquitetura estão em [ARCHITECTURE.md](./ARCHITECTURE.md).

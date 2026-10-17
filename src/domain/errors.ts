@@ -14,3 +14,15 @@ export class CurrencyMismatchError extends DomainError {
 }
 
 export class InvalidLedgerEntryError extends DomainError {}
+
+export class InsufficientFundsError extends DomainError {
+  constructor(balance: string, requested: string) {
+    super(`Insufficient funds: balance ${balance}, requested ${requested}`);
+  }
+}
+
+export class InvalidWalletError extends DomainError {}
+
+export class InvalidWagerTransactionError extends DomainError {}
+
+export class InvalidTransactionStateError extends DomainError {}

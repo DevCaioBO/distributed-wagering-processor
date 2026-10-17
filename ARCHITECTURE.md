@@ -11,7 +11,7 @@ Decisões tomadas até agora. As seções de concorrência, idempotência e mens
 
 ## 2. Domínio sem framework
 
-- Escolha: as classes de domínio não importam NestJS nem ORM. Construtor privado e factories estáticas (`from`, `create`, `rehydrate`).
+- Escolha: as classes de domínio não importam NestJS nem ORM. Construtor privado e factories estáticas (`from`, `create`, `open`, `rehydrate`).
 - Por quê: o domínio testa só com `bun test`, sem banco, e as regras ficam num lugar só. O desafio também pede isso.
 - Custo: depois vai ser preciso código de mapeamento entre domínio e banco.
 
@@ -37,3 +37,88 @@ Regras:
 - Saldo negativo é rejeitado. No banco isso vai virar uma constraint também.
 - Imutável: todos os campos são `readonly` e não há método que altere estado.
 - Limitação: o objeto `Date` interno continua mutável.
+
+## 5. Wallet
+
+- Escolha: a `Wallet` é o Aggregate Root. `debit` e `credit` devolvem o `WalletLedgerEntry` correspondente.
+- Por quê: não existe caminho no código que mude o saldo sem produzir o lançamento. A regra "toda alteração de saldo tem um lançamento" vale por construção.
+- O lançamento é criado antes de o saldo mudar. Se ele falhar, a wallet fica intacta.
+- `version` começa em 1 e só incrementa quando o saldo muda.
+- `open` devolve a wallet e o lançamento de abertura (`CREDIT`), porque o README pede a wallet já com o saldo inicial e `version` 1. Saldo inicial zero não gera lançamento.
+- Débito acima do saldo lança `InsufficientFundsError`. Moeda diferente da wallet lança `CurrencyMismatchError`. Valor zero ou negativo lança `InvalidWalletError`.
+- A `Wallet` não conhece provedor, fila nem banco. O mesmo objeto atende qualquer provedor.
+- A wallet é do jogador (`playerId` + moeda), não do provedor. Por isso a unidade de concorrência será a `walletId`, e não o provedor.
+- Limitação: o domínio não protege contra concorrência. Isso é responsabilidade do banco (lock e constraints), nas próximas fases.
+
+## 6. WagerTransaction
+
+Representa uma operação recebida de um provedor, com o ciclo de vida dela.
+
+### Estados e transições
+
+```
+PENDING            -> PENDING_REFERENCE | PROCESSED | REJECTED | FAILED
+PENDING_REFERENCE  -> PENDING_REFERENCE | PROCESSED | REJECTED | FAILED
+PROCESSED, REJECTED, FAILED: terminais
+```
+
+- Escolha: toda transição lança `InvalidTransactionStateError` se o estado atual já for terminal.
+- Por quê: o README trata isso como erro de programação, não como caminho de negócio. Uma transação que chegou a um estado terminal nunca muda, e falhar alto evita corromper um resultado já devolvido ao provedor.
+- `PENDING_REFERENCE` pode repetir: o worker de referências vai tentar de novo várias vezes, e enquanto a referência não chega a transação continua esperando.
+- `markPendingReference` exige que a transação tenha declarado uma referência, e `markProcessed` de `REFUND` ou `ROLLBACK` exige o id interno da referência. Assim um estado inconsistente não chega a existir.
+- `reject` guarda um `FailureCode` e `fail` também. `REJECTED` é violação de regra de negócio, e `FAILED` é erro permanente de infraestrutura.
+
+### Criação
+
+- `create` nasce `PENDING` e valida tudo que dá para validar sem consultar o banco: campos de texto não vazios, `kind` conhecido, referência exigida ou proibida por tipo, e valor.
+- `BET` não pode ter referência. `REFUND` e `ROLLBACK` exigem. `WIN` e `LOSS` aceitam, com ou sem.
+- Valor zero é rejeitado, exceto em `LOSS`, que só registra um resultado e não move saldo.
+- `OPENING` é rejeitado em `create`, porque é um tipo interno que não pode vir da API nem da fila. Falta uma factory interna para a transação de abertura da wallet, que será desenhada junto com a persistência (a transação de abertura não tem provedor nem idempotency key reais).
+
+### Direção do lançamento
+
+- `BET` debita. `WIN`, `REFUND` e `OPENING` creditam. `LOSS` não tem direção e lança erro.
+- `ROLLBACK` é o inverso da referência: reverter uma `BET` credita, reverter uma `WIN` ou um `REFUND` debita. Reverter outro `ROLLBACK` ou uma `LOSS` é erro.
+
+### Validação da referência
+
+- `validateReference(reference)` devolve um `FailureCode` ou `undefined`. Confere, nessa ordem: id externo, provedor, jogador, wallet, rodada e moeda iguais (`REFERENCE_MISMATCH`); tipo permitido (`INVALID_REFERENCE_KIND`); e, em `REFUND` e `ROLLBACK`, valor igual ao da referência (`AMOUNT_MISMATCH`).
+- Tipos permitidos: `REFUND` referencia só `BET`. `ROLLBACK` referencia `BET`, `WIN` ou `REFUND`. `WIN` e `LOSS` referenciam só `BET`.
+- O que fica de fora, de propósito, porque depende do banco e será do use case: a referência estar `PROCESSED`, a reversão única (uma referência não pode ser revertida duas vezes pelo mesmo tipo) e saldo negativo causado pela reversão.
+- Por quê: o domínio decide o que dá para decidir olhando só dois objetos, e devolve um código em vez de lançar, para o use case poder gravar a rejeição de forma auditável.
+
+## 7. Códigos de falha (`FailureCode`)
+
+O provedor precisa decidir sozinho se reenvia, corrige o payload ou desiste. Por isso cada código tem uma ação (`providerActionFor`), e o compilador obriga a definir a ação de todo código novo.
+
+| Código | Situação | O provedor deve |
+| --- | --- | --- |
+| `INSUFFICIENT_FUNDS` | `BET` sem saldo | desistir |
+| `REVERSAL_WOULD_OVERDRAW` | reversão deixaria o saldo negativo | falar com o suporte |
+| `REFERENCE_NOT_FOUND` | a referência não chegou dentro do limite de tentativas | corrigir a referência ou reenviar a original |
+| `REFERENCE_MISMATCH` | referência de outro provedor, jogador, wallet, rodada ou moeda | corrigir o payload |
+| `INVALID_REFERENCE_KIND` | tipo de referência não permitido | corrigir o payload |
+| `REFERENCE_NOT_PROCESSED` | a referência existe, mas foi rejeitada ou falhou | desistir |
+| `ALREADY_REVERSED` | a referência já foi revertida | desistir |
+| `AMOUNT_MISMATCH` | valor da reversão diferente do da referência | corrigir o payload |
+| `CURRENCY_MISMATCH` | moeda diferente da da wallet | corrigir o payload |
+| `WALLET_NOT_FOUND` | wallet inexistente | corrigir o payload |
+| `WALLET_PLAYER_MISMATCH` | a wallet não pertence ao jogador informado | corrigir o payload |
+| `PROCESSING_FAILED` | erro permanente de infraestrutura | falar com o suporte |
+
+- Saldo insuficiente em aposta e reversão que estoura o saldo têm códigos e ações diferentes, como o README pede: na primeira o provedor não pode fazer nada, e a segunda é uma situação operacional que alguém precisa olhar.
+- Falhas transitórias (banco fora do ar, por exemplo) não viram `FailureCode`. Elas não são gravadas como estado terminal: a operação é repetida, e só um erro permanente vira `FAILED`.
+- Alguns códigos só passam a ser usados quando o use case existir (`WALLET_NOT_FOUND`, `ALREADY_REVERSED`, `REVERSAL_WOULD_OVERDRAW`, `REFERENCE_NOT_PROCESSED`, `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`). Estão no enum para a taxonomia já ficar completa e documentada.
+
+## 8. Múltiplos provedores
+
+O provedor é só uma identidade (`providerId`). Não há lógica por provedor no domínio. O que muda nas próximas fases:
+
+- unicidade por provedor no banco: `(provider_id, external_transaction_id)` e `(provider_id, idempotency_key)`;
+- a referência de `REFUND` e `ROLLBACK` resolve por `(providerId, referenceExternalTransactionId)`, então um provedor nunca reverte transação de outro. O domínio já confere isso em `validateReference`.
+
+## 9. Estratégia de testes
+
+- Domínio: testes unitários com `bun test`, sem banco e sem fila. Não há infraestrutura para substituir, então não há mock.
+- Integração e concorrência (a partir da persistência): PostgreSQL e SQS reais em containers, com paralelismo real. O desafio elimina soluções que substituem PostgreSQL e SQS por mocks.
+- O tempo é passado como parâmetro (`now`, `at`, `createdAt`), o que deixa os testes determinísticos.
