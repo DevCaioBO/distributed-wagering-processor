@@ -4,7 +4,12 @@ Serviço que processa transações de apostas (`BET`, `WIN`, `LOSS`, `REFUND`, `
 
 Implementação do [desafio técnico da Jungle Gaming](https://github.com/junglegaming/backend-challenge/blob/main/README.md).
 
-Estado atual: domínio completo (`Money`, `WalletLedgerEntry`, `Wallet`, `WagerTransaction` e `FailureCode`) com testes unitários, e ambiente local com PostgreSQL e MiniStack (SQS) via Docker Compose. Ainda não há migrations, banco integrado à aplicação nem endpoints.
+## Estado atual
+
+- Domínio completo, com testes unitários: `Money`, `WalletLedgerEntry`, `Wallet`, `WagerTransaction` (incluindo a abertura interna `OPENING`) e `FailureCode`.
+- Ambiente local com PostgreSQL e MiniStack (SQS) via Docker Compose.
+- Schema do banco com as garantias de unicidade, imutabilidade e não-negatividade, em SQL versionado (`up` e `down`), com script que tenta violar cada garantia.
+- Ainda não há banco integrado à aplicação (ORM) nem endpoints.
 
 ## Requisitos
 
@@ -21,6 +26,8 @@ bun run infra:queues
 ```
 
 O `.env` não vai para o Git. Os valores do `.env.example` já funcionam para desenvolvimento local.
+
+As filas do MiniStack somem quando o container é recriado. Se isso acontecer, rode `bun run infra:queues` de novo.
 
 ## Comandos
 
@@ -41,10 +48,43 @@ O `.env` não vai para o Git. Os valores do `.env.example` já funcionam para de
 ```bash
 docker compose ps
 curl http://localhost:4566/_ministack/health
-docker compose exec postgres psql -U wagering -d wagering -c "select 1"
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select 1"'
 ```
 
 O serviço `postgres` deve aparecer como `healthy` no `docker compose ps`.
+
+Os comandos usam as variáveis `POSTGRES_USER` e `POSTGRES_DB` que já existem dentro do container, então funcionam com qualquer usuário definido no `.env`.
+
+## Banco de dados
+
+O schema fica em `db/`:
+
+```
+db/
+  migrations/
+    0001-initial.up.sql      cria wallets, wager_transactions e wallet_ledger_entries
+    0001-initial.down.sql    desfaz tudo
+  checks/
+    0001-constraints.sql     tenta violar cada garantia do schema
+```
+
+Por enquanto as migrations são aplicadas com `psql`, dentro do container:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrations/0001-initial.up.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/checks/0001-constraints.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrations/0001-initial.down.sql
+```
+
+Para listar as tabelas:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
+```
+
+Com o `up` aplicado, aparecem `wager_transactions`, `wallet_ledger_entries` e `wallets`.
+
+O script de checks imprime `ok` para cada garantia que o banco recusa violar. O ORM vai assumir o controle de versões das migrations nas próximas etapas.
 
 ## Estrutura
 
@@ -52,6 +92,9 @@ O serviço `postgres` deve aparecer como `healthy` no `docker compose ps`.
 src/
   domain/    regras de negócio, sem NestJS e sem ORM
   main.ts
+db/
+  migrations/    SQL versionado, com up e down
+  checks/        scripts que tentam violar as garantias do schema
 scripts/
   create-queues.ts    cria as filas SQS no MiniStack
 docker-compose.yml    PostgreSQL 16 e MiniStack
@@ -60,6 +103,8 @@ docker-compose.yml    PostgreSQL 16 e MiniStack
 
 ## Testes
 
-Os testes do domínio são unitários e rodam só com `bun test`. Os testes de integração e de concorrência vão usar PostgreSQL e SQS reais em containers, sem mocks, como o desafio exige.
+Os testes do domínio são unitários e rodam só com `bun test` (110 testes). Os testes de integração e de concorrência vão usar PostgreSQL e SQS reais em containers, sem mocks, como o desafio exige.
+
+## Decisões
 
 As decisões de arquitetura estão em [ARCHITECTURE.md](./ARCHITECTURE.md).
