@@ -2,7 +2,7 @@ import { Wallet } from '../../domain/wallet.js';
 import type { WalletRow } from './rows.js';
 
 export function toWalletRow(wallet: Wallet): WalletRow {
-  const { amount, currency } = wallet.balance.toJSON();
+  const { amount } = wallet.balance.toJSON();
   return {
     id: wallet.id,
     playerId: wallet.playerId,

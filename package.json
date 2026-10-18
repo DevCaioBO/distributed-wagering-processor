@@ -23,7 +23,8 @@
     "infra:queues": "bun run scripts/create-queues.ts",
     "db:migrate": "bun run scripts/migrate.ts up",
     "db:rollback": "bun run scripts/migrate.ts down",
-    "db:status": "bun run scripts/migrate.ts status"
+    "db:status": "bun run scripts/migrate.ts status",
+    "demo": "bun run scripts/demo.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1152.0",

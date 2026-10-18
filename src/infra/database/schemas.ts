@@ -1,5 +1,11 @@
 import { EntitySchema } from '@mikro-orm/core';
-import type { WalletLedgerEntryRow, WalletRow, WagerTransactionRow } from './rows.js';
+import type {
+  InboxMessageRow,
+  OutboxMessageRow,
+  WalletLedgerEntryRow,
+  WalletRow,
+  WagerTransactionRow,
+} from './rows.js';
 
 export const WalletSchema = new EntitySchema<WalletRow>({
   name: 'WalletRow',
@@ -58,6 +64,66 @@ export const WagerTransactionSchema = new EntitySchema<WagerTransactionRow>({
       type: 'Date',
       columnType: 'timestamptz',
       fieldName: 'processed_at',
+      nullable: true,
+    },
+    balanceAfter: {
+      type: 'string',
+      columnType: 'numeric(19,2)',
+      fieldName: 'balance_after',
+      nullable: true,
+    },
+    referenceAttempts: {
+      type: 'number',
+      columnType: 'integer',
+      fieldName: 'reference_attempts',
+      default: 0,
+    },
+    nextAttemptAt: {
+      type: 'Date',
+      columnType: 'timestamptz',
+      fieldName: 'next_attempt_at',
+      nullable: true,
+    },
+  },
+});
+
+export const InboxMessageSchema = new EntitySchema<InboxMessageRow>({
+  name: 'InboxMessageRow',
+  tableName: 'inbox_messages',
+  properties: {
+    messageId: { type: 'string', columnType: 'text', fieldName: 'message_id', primary: true },
+    consumerName: { type: 'string', columnType: 'text', fieldName: 'consumer_name', primary: true },
+    payloadHash: { type: 'string', columnType: 'text', fieldName: 'payload_hash' },
+    receivedAt: { type: 'Date', columnType: 'timestamptz', fieldName: 'received_at' },
+    processedAt: {
+      type: 'Date',
+      columnType: 'timestamptz',
+      fieldName: 'processed_at',
+      nullable: true,
+    },
+  },
+});
+
+export const OutboxMessageSchema = new EntitySchema<OutboxMessageRow>({
+  name: 'OutboxMessageRow',
+  tableName: 'outbox_messages',
+  properties: {
+    id: { type: 'uuid', primary: true },
+    aggregateId: { type: 'string', columnType: 'text', fieldName: 'aggregate_id' },
+    eventType: { type: 'string', columnType: 'text', fieldName: 'event_type' },
+    payload: { type: 'json', columnType: 'jsonb' },
+    occurredAt: { type: 'Date', columnType: 'timestamptz', fieldName: 'occurred_at' },
+    attempts: { type: 'number', columnType: 'integer', default: 0 },
+    nextAttemptAt: {
+      type: 'Date',
+      columnType: 'timestamptz',
+      fieldName: 'next_attempt_at',
+      nullable: true,
+    },
+    publishedAt: {
+      type: 'Date',
+      columnType: 'timestamptz',
+      fieldName: 'published_at',
       nullable: true,
     },
   },

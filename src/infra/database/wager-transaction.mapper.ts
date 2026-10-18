@@ -1,7 +1,16 @@
+import type { Money } from '../../domain/money.js';
 import { WagerTransaction } from '../../domain/wager-transaction.js';
 import type { WagerTransactionRow } from './rows.js';
 
-export function toWagerTransactionRow(transaction: WagerTransaction): WagerTransactionRow {
+export interface WagerTransactionRowExtras {
+  /** Saldo observado no momento da aplicação (replay). */
+  balanceAfter?: Money;
+}
+
+export function toWagerTransactionRow(
+  transaction: WagerTransaction,
+  extras: WagerTransactionRowExtras = {},
+): WagerTransactionRow {
   const { amount, currency } = transaction.money.toJSON();
   return {
     id: transaction.id,
@@ -22,6 +31,9 @@ export function toWagerTransactionRow(transaction: WagerTransaction): WagerTrans
     failureCode: transaction.failureCode ?? null,
     createdAt: transaction.createdAt,
     processedAt: transaction.processedAt ?? null,
+    balanceAfter: extras.balanceAfter?.toJSON().amount ?? null,
+    referenceAttempts: 0,
+    nextAttemptAt: null,
   };
 }
 

@@ -26,3 +26,7 @@ export class InvalidWalletError extends DomainError {}
 export class InvalidWagerTransactionError extends DomainError {}
 
 export class InvalidTransactionStateError extends DomainError {}
+
+export class InvalidInboxMessageError extends DomainError {}
+
+export class InvalidOutboxMessageError extends DomainError {}
