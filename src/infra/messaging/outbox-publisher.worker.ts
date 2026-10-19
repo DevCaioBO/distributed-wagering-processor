@@ -5,6 +5,8 @@ import { referenceBackoffMs } from '../../application/wagering-config.js';
 import type { OutboxMessageRow } from '../database/rows.js';
 import { OutboxMessageSchema } from '../database/schemas.js';
 import { toOutboxMessage } from '../database/outbox-message.mapper.js';
+import { OUTBOX_MESSAGE_COLUMNS } from '../database/sql-columns.js';
+import { fromRawOutboxMessage } from '../database/raw-rows.js';
 import type { SqsGateway } from './sqs-gateway.js';
 
 export interface OutboxPublisherConfig {
@@ -46,16 +48,19 @@ export class OutboxPublisherWorker {
       // A transação mantém o lock das linhas enquanto o lote é enviado: outra
       // instância não pega as mesmas mensagens, e um crash no meio devolve as
       // linhas ao estado pendente (rollback) para nova tentativa.
-      const rows = await tem.execute<OutboxMessageRow[]>(
-        `select * from outbox_messages
-          where published_at is null
-            and (next_attempt_at is null or next_attempt_at <= ?)
-          order by occurred_at
-          limit ?
-          for update skip locked`,
-        [now.toISOString(), this.config.batchSize],
-        'all',
-      );
+      const rows = (
+        await tem.execute<Record<string, unknown>[]>(
+          `select ${OUTBOX_MESSAGE_COLUMNS}
+             from outbox_messages
+            where published_at is null
+              and (next_attempt_at is null or next_attempt_at <= ?)
+            order by occurred_at
+            limit ?
+            for update skip locked`,
+          [now.toISOString(), this.config.batchSize],
+          'all',
+        )
+      ).map(fromRawOutboxMessage);
 
       let count = 0;
       for (const row of rows) {

@@ -1,5 +1,3 @@
-import { setDefaultResultOptions } from 'node:util';
-
 // Os testes de integração dependem do ambiente real (Postgres + SQS local).
 // Este setup roda antes de todos os arquivos de teste e garante que a
 // DATABASE_URL esteja definida, senão aborta com mensagem clara.
@@ -14,5 +12,3 @@ if (process.env.AWS_ENDPOINT_URL === undefined || process.env.AWS_ENDPOINT_URL.t
 if (process.env.AWS_REGION === undefined) {
   process.env.AWS_REGION = 'us-east-1';
 }
-
-setDefaultResultOptions({ error: true });

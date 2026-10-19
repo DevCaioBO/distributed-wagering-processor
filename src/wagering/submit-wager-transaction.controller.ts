@@ -28,8 +28,11 @@ interface SubmitResponse {
  * PROCESSED (200), PENDING/PENDING_REFERENCE (202), REJECTED (422).
  * Payload inválido (400) e conflito de idempotência (409) são resolvidos
  * pelo exception filter global.
+ *
+ * `/wager-transactions` é o path original do projeto; `/wagering/transactions`
+ * é a rota canônica do desafio — as duas apontam para o mesmo handler.
  */
-@Controller('wager-transactions')
+@Controller(['wager-transactions', 'wagering/transactions'])
 export class SubmitWagerTransactionController {
   private readonly logger = new JsonLogger();
 

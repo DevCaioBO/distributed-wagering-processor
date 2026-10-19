@@ -2,16 +2,7 @@ import { DeadlockException } from '@mikro-orm/core';
 import type { EntityManager } from '@mikro-orm/postgresql';
 import type { MetricsPort } from './ports/metrics.port.js';
 import type { WalletRow } from '../infra/database/rows.js';
-
-interface RawWalletRow {
-  id: string;
-  player_id: string;
-  currency: string;
-  balance: string;
-  version: number;
-  created_at: Date;
-  updated_at: Date;
-}
+import { fromRawWallet } from '../infra/database/raw-rows.js';
 
 /**
  * A unidade de concorrência é a wallet. Todo caminho que altera saldo passa
@@ -26,7 +17,9 @@ export async function lockWalletForUpdate(
 ): Promise<WalletRow | null> {
   const startedAt = performance.now();
   try {
-    const rows = await em.execute<RawWalletRow[]>(
+    // `select *` cru: snake_case e timestamps como string — `fromRawWallet`
+    // converte para o shape camelCase com Date usado pelo mapper da wallet.
+    const rows = await em.execute<Record<string, unknown>[]>(
       'select * from wallets where id = ? for update',
       [walletId],
       'all',
@@ -35,15 +28,7 @@ export async function lockWalletForUpdate(
     if (raw === undefined) {
       return null;
     }
-    return {
-      id: raw.id,
-      playerId: raw.player_id,
-      currency: raw.currency,
-      balance: raw.balance,
-      version: raw.version,
-      createdAt: raw.created_at,
-      updatedAt: raw.updated_at,
-    } as WalletRow;
+    return fromRawWallet(raw);
   } finally {
     metrics.observeWalletLockWait(performance.now() - startedAt);
   }

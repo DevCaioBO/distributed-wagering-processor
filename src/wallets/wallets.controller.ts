@@ -30,4 +30,14 @@ export class WalletsController {
   reconcile(@Param('id') id: string) {
     return this.walletsService.reconcile(id);
   }
+
+  /**
+   * Rota canônica do desafio: `POST /wallets/:walletId/reconciliation`.
+   * Mesmo caso de uso do GET `:id/reconcile` — a reconciliação é uma leitura
+   * de conferência, não uma escrita.
+   */
+  @Post(':id/reconciliation')
+  reconcilePost(@Param('id') id: string) {
+    return this.walletsService.reconcile(id);
+  }
 }

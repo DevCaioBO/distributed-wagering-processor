@@ -20,7 +20,8 @@ export interface WalletResponse {
   id: string;
   playerId: string;
   currency: string;
-  balance: string;
+  /** Saldo no formato Money do desafio: { amount, currency }. */
+  balance: { amount: string; currency: string };
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -68,12 +69,12 @@ export class WalletsService {
       throw new NotFoundException(`Wallet ${id} not found`);
     }
     const wallet = toWallet(row);
-    const { amount } = wallet.balance.toJSON();
+    const balance = wallet.balance.toJSON();
     return {
       id: wallet.id,
       playerId: wallet.playerId,
       currency: wallet.currency,
-      balance: amount,
+      balance,
       version: wallet.version,
       createdAt: wallet.createdAt.toISOString(),
       updatedAt: wallet.updatedAt.toISOString(),

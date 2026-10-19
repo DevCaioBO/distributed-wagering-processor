@@ -1,6 +1,7 @@
 import {
   ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
+  GetQueueAttributesCommand,
   PurgeQueueCommand,
   SendMessageCommand,
   SQSClient,
@@ -31,6 +32,7 @@ export interface SqsGatewayPort {
     visibilityTimeoutSeconds: number,
   ): Promise<void>;
   purge(queueUrl: string): Promise<void>;
+  ping(queueUrl: string): Promise<void>;
 }
 
 /**
@@ -91,5 +93,12 @@ export class SqsGateway implements SqsGatewayPort {
 
   async purge(queueUrl: string): Promise<void> {
     await this.client.send(new PurgeQueueCommand({ QueueUrl: queueUrl }));
+  }
+
+  /** Checagem de disponibilidade para o /health/ready. Lança se a fila estiver inacessível. */
+  async ping(queueUrl: string): Promise<void> {
+    await this.client.send(
+      new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ['QueueArn'] }),
+    );
   }
 }

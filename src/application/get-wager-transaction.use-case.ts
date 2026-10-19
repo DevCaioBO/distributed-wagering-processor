@@ -2,6 +2,8 @@ import type { EntityManager } from '@mikro-orm/postgresql';
 import type { WagerTransaction } from '../domain/wager-transaction.js';
 import type { WagerTransactionRow } from '../infra/database/rows.js';
 import { toWagerTransaction } from '../infra/database/wager-transaction.mapper.js';
+import { WAGER_TRANSACTION_COLUMNS } from '../infra/database/sql-columns.js';
+import { fromRawWagerTransaction } from '../infra/database/raw-rows.js';
 import { WagerTransactionNotFoundError } from './errors.js';
 
 export interface GetWagerTransactionQuery {
@@ -41,20 +43,22 @@ export class GetWagerTransactionUseCase implements GetWagerTransactionUseCasePor
 
   private async findRow(query: GetWagerTransactionQuery): Promise<WagerTransactionRow | null> {
     if (query.id !== undefined) {
-      const rows = await this.em.execute<WagerTransactionRow[]>(
-        'select * from wager_transactions where id = ?::uuid',
+      const rows = await this.em.execute<Record<string, unknown>[]>(
+        `select ${WAGER_TRANSACTION_COLUMNS}
+           from wager_transactions where id = ?::uuid`,
         [query.id],
         'all',
       );
-      return rows[0] ?? null;
+      return rows[0] === undefined ? null : fromRawWagerTransaction(rows[0]);
     }
 
     if (query.providerId === undefined || query.externalTransactionId === undefined) {
       throw new WagerTransactionNotFoundError('consulta deve informar id ou (providerId + externalTransactionId)');
     }
 
-    const rows = await this.em.execute<WagerTransactionRow[]>(
-      `select * from wager_transactions
+    const rows = await this.em.execute<Record<string, unknown>[]>(
+      `select ${WAGER_TRANSACTION_COLUMNS}
+         from wager_transactions
         where provider_id = ?
           and external_transaction_id = ?
         order by created_at
@@ -62,6 +66,6 @@ export class GetWagerTransactionUseCase implements GetWagerTransactionUseCasePor
       [query.providerId, query.externalTransactionId],
       'all',
     );
-    return rows[0] ?? null;
+    return rows[0] === undefined ? null : fromRawWagerTransaction(rows[0]);
   }
 }

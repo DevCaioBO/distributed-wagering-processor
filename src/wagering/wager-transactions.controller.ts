@@ -13,8 +13,9 @@ import { WagerTransactionNotFoundError } from '../application/errors.js';
 /**
  * Consulta de transações: por id interno ou pelo par
  * (providerId, externalTransactionId) usado pelo provedor.
+ * `/wagering/transactions` é a rota canônica do desafio.
  */
-@Controller('wager-transactions')
+@Controller(['wager-transactions', 'wagering/transactions'])
 export class WagerTransactionsController {
   constructor(private readonly em: EntityManager) {}
 

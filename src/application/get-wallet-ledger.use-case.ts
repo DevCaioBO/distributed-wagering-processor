@@ -4,6 +4,8 @@ import { LedgerDirection } from '../domain/wallet-ledger-entry.js';
 import type { WalletLedgerEntryRow, WalletRow } from '../infra/database/rows.js';
 import { WalletSchema } from '../infra/database/schemas.js';
 import { PayloadValidationError, WalletNotFoundError } from './errors.js';
+import { WALLET_LEDGER_ENTRY_COLUMNS } from '../infra/database/sql-columns.js';
+import { fromRawWalletLedgerEntry } from '../infra/database/raw-rows.js';
 
 export interface LedgerEntryResponse {
   id: string;
@@ -49,18 +51,22 @@ export class GetWalletLedgerUseCase {
     const limit = this.parseLimit(options.limit);
     const cursor = options.cursor !== undefined ? decodeCursor(options.cursor) : undefined;
 
-    const rows = (await this.em.execute<WalletLedgerEntryRow[]>(
-      cursor === undefined
-        ? `select * from wallet_ledger_entries where wallet_id = ?
-             order by created_at desc, id desc limit ?`
-        : `select * from wallet_ledger_entries
-             where wallet_id = ? and (created_at, id) < (?::timestamptz, ?::uuid)
-             order by created_at desc, id desc limit ?`,
-      cursor === undefined
-        ? [walletId, limit + 1]
-        : [walletId, cursor.createdAt, cursor.id, limit + 1],
-      'all',
-    )) as WalletLedgerEntryRow[];
+    const rows = (
+      await this.em.execute<Record<string, unknown>[]>(
+        cursor === undefined
+          ? `select ${WALLET_LEDGER_ENTRY_COLUMNS}
+               from wallet_ledger_entries where wallet_id = ?
+               order by created_at desc, id desc limit ?`
+          : `select ${WALLET_LEDGER_ENTRY_COLUMNS}
+               from wallet_ledger_entries
+               where wallet_id = ? and (created_at, id) < (?::timestamptz, ?::uuid)
+               order by created_at desc, id desc limit ?`,
+        cursor === undefined
+          ? [walletId, limit + 1]
+          : [walletId, cursor.createdAt, cursor.id, limit + 1],
+        'all',
+      )
+    ).map(fromRawWalletLedgerEntry);
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;

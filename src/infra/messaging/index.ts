@@ -1,3 +1,4 @@
 export * from './sqs-gateway.js';
 export * from './sqs-config.js';
 export * from './outbox-publisher.worker.js';
+export * from './sqs-consumer.worker.js';
